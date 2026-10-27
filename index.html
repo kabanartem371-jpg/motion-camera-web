@@ -53,7 +53,7 @@ h1{font-family:var(--font-display);font-size:1.35rem;font-weight:700;margin:0;te
 .controls{display:flex;flex-wrap:wrap;gap:8px}
 button,.filebtn{font:600 .92rem var(--font-body);border-radius:8px;padding:10px 14px;cursor:pointer;
   border:1px solid var(--line);background:var(--panel);color:var(--fg)}
-button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+button.primary,.filebtn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 button:focus-visible,.filebtn:focus-within,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button[disabled]{opacity:.45;cursor:default}
 .filebtn input{position:absolute;width:1px;height:1px;opacity:0}
@@ -117,9 +117,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       <label for="sens"><span class="row">Чутливість <output id="sensOut"></output></span>
         <input type="range" id="sens" min="1" max="10" value="6"></label>
       <label for="minArea"><span class="row">Мінімальний розмір об'єкта <output id="minAreaOut"></output></span>
-        <input type="range" id="minArea" min="1" max="40" value="6"></label>
+        <input type="range" id="minArea" min="1" max="40" value="8"></label>
       <label for="hold"><span class="row">Тримати після зупинки <output id="holdOut"></output></span>
         <input type="range" id="hold" min="1" max="15" value="4"></label>
+    </div>
+    <div class="controls" style="margin-top:12px">
+      <button id="presetBirds" type="button">Режим «Птахи»</button>
+      <button id="presetNormal" type="button">Звичайний режим</button>
     </div>
   </section>
 
@@ -143,10 +147,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   video.muted = true; video.playsInline = true; video.setAttribute("playsinline", "");
 
   // --- налаштування
-  const S = { sens: 6, minArea: 6, hold: 4 };
+  const S = { sens: 6, minArea: 8, hold: 4 };
+  const areaPct = v => 0.01 * Math.pow(v, 1.6); // 1 → 0.01 %, 8 → 0.28 %, 40 → 3.6 %
   const fmt = {
     sens: v => v + "/10",
-    minArea: v => (v * 0.1).toFixed(1) + "% кадру",
+    minArea: v => areaPct(v).toFixed(v < 4 ? 2 : 1) + "% кадру",
     hold: v => v + " с"
   };
   ["sens","minArea","hold"].forEach(k => {
@@ -156,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   });
 
   // --- стан
-  const PW = 160; let PH = 120;              // розмір кадру для аналізу
+  const PW = 320; let PH = 240;              // розмір кадру для аналізу
   const work = document.createElement("canvas");
   const wctx = work.getContext("2d", { willReadFrequently: true });
   let bg = null, warm = 0, stream = null, facing = "environment", running = false, lastProc = 0, raf = 0, wakeLock = null;
@@ -182,8 +187,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     begin("камера");
   }
   function camFail(e){
-    setStatus("", "немає доступу");
-    msg("Браузер не дав доступу до камери. Усередині Claude камера недоступна: натисніть «Записати або обрати відео» — телефон відкриє камеру, а програма проаналізує запис. Для живої камери відкрийте цей файл у Chrome.", true);
+    setStatus("", "жива камера недоступна");
+    $("btnCam").classList.remove("primary");
+    $("btnCam").disabled = true;
+    document.querySelector(".filebtn").classList.add("primary");
+    msg("Тут жива камера не працює. Натисніть «Записати або обрати відео»: телефон відкриє камеру, ви знімете кілька секунд, і програма покаже, що рухалось.");
   }
   function startFile(file){
     stopAll(true);
@@ -248,7 +256,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     }
 
     // пошук зв'язних областей
-    const seen = new Uint8Array(n), boxes = [], minPx = n * S.minArea * 0.001, stack = [];
+    const seen = new Uint8Array(n), boxes = [], minPx = n * areaPct(S.minArea) / 100, stack = [];
     for (let i = 0; i < n; i++){
       if (!dil[i] || seen[i]) continue;
       let x0 = PW, y0 = PH, x1 = 0, y1 = 0, cnt = 0, real = 0;
@@ -354,6 +362,14 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   }
 
   // --- кнопки
+  const preset = (sens, minArea, hold, note) => {
+    [["sens",sens],["minArea",minArea],["hold",hold]].forEach(([k,v]) => {
+      const el = $(k); el.value = v; el.dispatchEvent(new Event("input"));
+    });
+    resetBg(); msg(note);
+  };
+  $("presetBirds").onclick = () => preset(9, 1, 2, "Режим «Птахи»: висока чутливість і дрібні об'єкти. Дрібниці на кшталт листя теж можуть потрапляти в кадр.");
+  $("presetNormal").onclick = () => preset(6, 8, 4, "Звичайний режим: люди, тварини, машини.");
   $("btnCam").onclick = startCamera;
   $("btnFlip").onclick = () => { facing = facing === "environment" ? "user" : "environment"; startCamera(); };
   $("btnReset").onclick = () => { resetBg(); msg("Фон скинуто. Програма запам'ятовує новий."); };

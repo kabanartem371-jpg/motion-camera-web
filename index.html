@@ -1,0 +1,367 @@
+<title>Детектор руху</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: пульт охорони — темний «монітор» з кадром угорі, під ним керування і журнал подій */
+:root{
+  --bg:#eef1f3; --panel:#ffffff; --fg:#14191d; --muted:#5c6770; --line:#d5dbe0;
+  --accent:#0f6e6a; --accent-fg:#ffffff;
+  --motion:#d7263d; --moved:#e0a100; --ok:#2f8f4e;
+  --stage:#0b0e10; --stage-fg:#c9d2d8;
+  --font-display:"Golos Text", "Segoe UI", Roboto, sans-serif;
+  --font-body:"Golos Text", "Segoe UI", Roboto, sans-serif;
+  --font-data:"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101417; --panel:#171d21; --fg:#e4e9ec; --muted:#8d99a2; --line:#28323a;
+  --accent:#3fb3ab; --accent-fg:#06201e; --motion:#ff4d61; --moved:#f2b92c; --ok:#4cc06f;
+  --stage:#050708; --stage-fg:#c9d2d8; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#101417; --panel:#171d21; --fg:#e4e9ec; --muted:#8d99a2; --line:#28323a;
+  --accent:#3fb3ab; --accent-fg:#06201e; --motion:#ff4d61; --moved:#f2b92c; --ok:#4cc06f;
+  --stage:#050708; --stage-fg:#c9d2d8; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.5}
+.wrap{max-width:880px;margin:0 auto;padding-block:16px 40px;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));
+  display:flex;flex-direction:column;gap:16px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-family:var(--font-display);font-size:1.35rem;font-weight:700;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.pill{font-family:var(--font-data);font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.live i{background:var(--ok)}
+.pill.motion{color:var(--motion);border-color:var(--motion)}
+.pill.motion i{background:var(--motion);animation:blink .8s infinite}
+@keyframes blink{50%{opacity:.25}}
+
+.stage{position:relative;background:var(--stage);color:var(--stage-fg);border-radius:10px;overflow:hidden;aspect-ratio:4/3;max-width:100%}
+.stage canvas{display:block;width:100%;height:100%;object-fit:contain}
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:10px;padding:24px;
+  background:repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.025) 3px 4px)}
+.empty b{font-family:var(--font-display);font-size:1.1rem;color:#fff}
+.empty p{margin:0;max-width:52ch;color:var(--stage-fg);font-size:.92rem}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-data);font-size:.78rem}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:10px;border:2px solid}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--font-data);font-size:.72rem;color:#fff;
+  text-shadow:0 1px 2px #000;pointer-events:none}
+
+.controls{display:flex;flex-wrap:wrap;gap:8px}
+button,.filebtn{font:600 .92rem var(--font-body);border-radius:8px;padding:10px 14px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+button:focus-visible,.filebtn:focus-within,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button[disabled]{opacity:.45;cursor:default}
+.filebtn input{position:absolute;width:1px;height:1px;opacity:0}
+
+.msg{font-size:.9rem;color:var(--muted);margin:0}
+.msg.err{color:var(--motion)}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.panel h2{font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 10px;font-weight:600}
+.sliders{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.sliders label{display:flex;flex-direction:column;gap:4px;font-size:.88rem}
+.sliders .row{display:flex;justify-content:space-between;gap:8px}
+.sliders output{font-family:var(--font-data);font-variant-numeric:tabular-nums;color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+
+.stats{display:flex;gap:20px;flex-wrap:wrap;font-family:var(--font-data);font-variant-numeric:tabular-nums;font-size:.85rem;color:var(--muted)}
+.stats strong{color:var(--fg);font-weight:600}
+
+.log{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.log li{display:flex;flex-direction:column;gap:4px;min-width:0}
+.log img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;background:var(--stage)}
+.log .meta{font-family:var(--font-data);font-size:.75rem;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.log .meta b{color:var(--motion);font-weight:600}
+.nolog{color:var(--muted);font-size:.9rem;margin:0}
+@media (prefers-reduced-motion: reduce){.pill.motion i{animation:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Детектор руху</h1>
+    <span class="pill" id="status"><i></i><span id="statusText">вимкнено</span></span>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="view" width="640" height="480" aria-label="Зображення з камери з позначеними об'єктами"></canvas>
+    <div class="hud" id="hud" hidden></div>
+    <div class="empty" id="empty">
+      <b>Камера ще не увімкнена</b>
+      <p>Програма порівнює кожен кадр із фоном. Усе, що змінилося, вона бере в рамку з номером і малює слід руху. Датчики не потрібні.</p>
+      <div class="legend">
+        <span><span class="sw" style="border-color:var(--motion)"></span>рухається зараз</span>
+        <span><span class="sw" style="border-color:var(--moved)"></span>рухався, зупинився</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="btnCam" type="button">Увімкнути камеру</button>
+    <button id="btnFlip" type="button" disabled>Змінити камеру</button>
+    <label class="filebtn" tabindex="-1">Записати або обрати відео
+      <input type="file" id="file" accept="video/*" capture="environment">
+    </label>
+    <button id="btnReset" type="button" disabled>Скинути фон</button>
+    <button id="btnStop" type="button" disabled>Зупинити</button>
+  </div>
+  <p class="msg" id="msg">Тримайте камеру нерухомо: програма шукає зміни в кадрі, тому тремтіння самої камери теж виглядає як рух.</p>
+
+  <section class="panel" aria-labelledby="hSet">
+    <h2 id="hSet">Налаштування</h2>
+    <div class="sliders">
+      <label for="sens"><span class="row">Чутливість <output id="sensOut"></output></span>
+        <input type="range" id="sens" min="1" max="10" value="6"></label>
+      <label for="minArea"><span class="row">Мінімальний розмір об'єкта <output id="minAreaOut"></output></span>
+        <input type="range" id="minArea" min="1" max="40" value="6"></label>
+      <label for="hold"><span class="row">Тримати після зупинки <output id="holdOut"></output></span>
+        <input type="range" id="hold" min="1" max="15" value="4"></label>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="hLog">
+    <h2 id="hLog">Журнал подій</h2>
+    <div class="stats" style="margin-bottom:12px">
+      <span>Об'єктів зараз: <strong id="sNow">0</strong></span>
+      <span>Подій усього: <strong id="sTotal">0</strong></span>
+      <span>Останній рух: <strong id="sLast">—</strong></span>
+    </div>
+    <p class="nolog" id="nolog">Тут з'являтимуться знімки кожного нового рухомого об'єкта з часом.</p>
+    <ul class="log" id="log"></ul>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const view = $("view"), vctx = view.getContext("2d");
+  const video = document.createElement("video");
+  video.muted = true; video.playsInline = true; video.setAttribute("playsinline", "");
+
+  // --- налаштування
+  const S = { sens: 6, minArea: 6, hold: 4 };
+  const fmt = {
+    sens: v => v + "/10",
+    minArea: v => (v * 0.1).toFixed(1) + "% кадру",
+    hold: v => v + " с"
+  };
+  ["sens","minArea","hold"].forEach(k => {
+    const el = $(k), out = $(k + "Out");
+    const upd = () => { S[k] = +el.value; out.textContent = fmt[k](S[k]); };
+    el.addEventListener("input", upd); upd();
+  });
+
+  // --- стан
+  const PW = 160; let PH = 120;              // розмір кадру для аналізу
+  const work = document.createElement("canvas");
+  const wctx = work.getContext("2d", { willReadFrequently: true });
+  let bg = null, warm = 0, stream = null, facing = "environment", running = false, lastProc = 0, raf = 0, wakeLock = null;
+  let tracks = new Map(), nextId = 1, total = 0, motionNow = false;
+
+  function setStatus(kind, text){
+    const p = $("status"); p.className = "pill " + kind; $("statusText").textContent = text;
+  }
+  function msg(t, err){ const m = $("msg"); m.textContent = t; m.className = "msg" + (err ? " err" : ""); }
+
+  function resetBg(){ bg = null; warm = 12; tracks.clear(); }
+
+  // --- старт джерел
+  async function startCamera(){
+    stopAll(true);
+    if (!navigator.mediaDevices?.getUserMedia){ return camFail(); }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
+    } catch (e) { return camFail(e); }
+    video.srcObject = stream; video.loop = false;
+    await video.play().catch(()=>{});
+    $("btnFlip").disabled = false;
+    begin("камера");
+  }
+  function camFail(e){
+    setStatus("", "немає доступу");
+    msg("Браузер не дав доступу до камери. Усередині Claude камера недоступна: натисніть «Записати або обрати відео» — телефон відкриє камеру, а програма проаналізує запис. Для живої камери відкрийте цей файл у Chrome.", true);
+  }
+  function startFile(file){
+    stopAll(true);
+    video.srcObject = null; video.src = URL.createObjectURL(file); video.loop = false;
+    video.onended = () => { setStatus("", "відео закінчилось"); running = false; cancelAnimationFrame(raf); };
+    video.play().then(() => begin("відео")).catch(() => msg("Не вдалося відтворити це відео. Спробуйте файл у форматі MP4.", true));
+  }
+  function begin(src){
+    const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+    view.width = Math.min(960, vw); view.height = Math.round(view.width * vh / vw);
+    $("stage").style.aspectRatio = vw + "/" + vh;
+    PH = Math.max(40, Math.round(PW * vh / vw)); work.width = PW; work.height = PH;
+    resetBg(); running = true;
+    $("empty").hidden = true; $("hud").hidden = false;
+    ["btnReset","btnStop"].forEach(id => $(id).disabled = false);
+    setStatus("live", src === "камера" ? "спостереження" : "аналіз відео");
+    msg(src === "камера" ? "Перші секунду-дві програма запам'ятовує фон. Не рухайте камеру." : "Аналізую запис…");
+    if ("wakeLock" in navigator) navigator.wakeLock.request("screen").then(l => wakeLock = l).catch(()=>{});
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
+  }
+  function stopAll(silent){
+    running = false; cancelAnimationFrame(raf);
+    if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+    video.pause();
+    if (wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+    $("btnFlip").disabled = true;
+    if (!silent){ setStatus("", "вимкнено"); ["btnReset","btnStop"].forEach(id => $(id).disabled = true); }
+  }
+
+  // --- головний цикл
+  function loop(t){
+    if (!running) return;
+    raf = requestAnimationFrame(loop);
+    if (video.readyState < 2) return;
+    vctx.drawImage(video, 0, 0, view.width, view.height);
+    if (t - lastProc > 66) { lastProc = t; process(t / 1000); }
+    draw(t / 1000);
+  }
+
+  function process(now){
+    wctx.drawImage(video, 0, 0, PW, PH);
+    const px = wctx.getImageData(0, 0, PW, PH).data;
+    const n = PW * PH, gray = new Float32Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) gray[i] = px[j]*0.299 + px[j+1]*0.587 + px[j+2]*0.114;
+    if (!bg){ bg = gray.slice(); return; }
+
+    const thr = 62 - S.sens * 5;              // 57..12
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++){
+      const d = Math.abs(gray[i] - bg[i]);
+      mask[i] = d > thr ? 1 : 0;
+      bg[i] += (gray[i] - bg[i]) * (mask[i] ? 0.004 : 0.06); // фон повільно підлаштовується
+    }
+    if (warm > 0){ warm--; return; }
+
+    // розширення маски, щоб частини одного об'єкта злились
+    const dil = new Uint8Array(n);
+    for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++){
+      if (!mask[y*PW+x]) continue;
+      for (let dy = -2; dy <= 2; dy++){ const yy = y+dy; if (yy<0||yy>=PH) continue;
+        for (let dx = -2; dx <= 2; dx++){ const xx = x+dx; if (xx>=0&&xx<PW) dil[yy*PW+xx] = 1; } }
+    }
+
+    // пошук зв'язних областей
+    const seen = new Uint8Array(n), boxes = [], minPx = n * S.minArea * 0.001, stack = [];
+    for (let i = 0; i < n; i++){
+      if (!dil[i] || seen[i]) continue;
+      let x0 = PW, y0 = PH, x1 = 0, y1 = 0, cnt = 0, real = 0;
+      stack.push(i); seen[i] = 1;
+      while (stack.length){
+        const k = stack.pop(), x = k % PW, y = (k / PW) | 0;
+        cnt++; if (mask[k]) real++;
+        if (x<x0)x0=x; if (x>x1)x1=x; if (y<y0)y0=y; if (y>y1)y1=y;
+        if (x>0 && dil[k-1] && !seen[k-1]){ seen[k-1]=1; stack.push(k-1); }
+        if (x<PW-1 && dil[k+1] && !seen[k+1]){ seen[k+1]=1; stack.push(k+1); }
+        if (y>0 && dil[k-PW] && !seen[k-PW]){ seen[k-PW]=1; stack.push(k-PW); }
+        if (y<PH-1 && dil[k+PW] && !seen[k+PW]){ seen[k+PW]=1; stack.push(k+PW); }
+      }
+      if (real >= minPx) boxes.push({ x: x0, y: y0, w: x1-x0+1, h: y1-y0+1 });
+    }
+    // якщо змінився майже весь кадр — це світло або рух камери, а не об'єкт
+    const covered = boxes.reduce((s,b)=>s+b.w*b.h,0);
+    if (covered > n * 0.8){ resetBg(); msg("Змінилось освітлення або камера зрушила — фон оновлено."); return; }
+
+    track(merge(boxes), now);
+  }
+
+  function merge(bs){
+    let changed = true;
+    while (changed){
+      changed = false;
+      outer: for (let i = 0; i < bs.length; i++) for (let j = i+1; j < bs.length; j++){
+        const a = bs[i], b = bs[j], g = 3;
+        if (a.x-g < b.x+b.w && b.x-g < a.x+a.w && a.y-g < b.y+b.h && b.y-g < a.y+a.h){
+          const x = Math.min(a.x,b.x), y = Math.min(a.y,b.y);
+          bs[i] = { x, y, w: Math.max(a.x+a.w,b.x+b.w)-x, h: Math.max(a.y+a.h,b.y+b.h)-y };
+          bs.splice(j,1); changed = true; break outer;
+        }
+      }
+    }
+    return bs;
+  }
+
+  function track(boxes, now){
+    const free = boxes.map((_,i)=>i), maxD = PW * 0.22;
+    for (const tr of tracks.values()){
+      const cx = tr.b.x + tr.b.w/2, cy = tr.b.y + tr.b.h/2;
+      let best = -1, bd = maxD;
+      for (const i of free){ const b = boxes[i];
+        const d = Math.hypot(cx-(b.x+b.w/2), cy-(b.y+b.h/2)); if (d < bd){ bd = d; best = i; } }
+      if (best >= 0){
+        tr.b = boxes[best]; tr.last = now;
+        tr.trail.push([tr.b.x+tr.b.w/2, tr.b.y+tr.b.h/2]); if (tr.trail.length > 60) tr.trail.shift();
+        free.splice(free.indexOf(best), 1);
+      }
+    }
+    for (const i of free){
+      const b = boxes[i], tr = { id: nextId++, b, last: now, born: now, trail: [[b.x+b.w/2, b.y+b.h/2]], shot: false };
+      tracks.set(tr.id, tr);
+    }
+    for (const [id, tr] of tracks) if (now - tr.last > S.hold) tracks.delete(id);
+    motionNow = boxes.length > 0;
+    if (motionNow) $("sLast").textContent = clock();
+  }
+
+  function draw(now){
+    const sx = view.width / PW, sy = view.height / PH;
+    const css = getComputedStyle(document.documentElement);
+    const cM = css.getPropertyValue("--motion").trim() || "#d7263d";
+    const cS = css.getPropertyValue("--moved").trim() || "#e0a100";
+    vctx.lineJoin = "round"; vctx.font = "600 " + Math.max(12, view.width/45) + "px JetBrains Mono, monospace";
+    for (const tr of tracks.values()){
+      const still = now - tr.last > 0.5, c = still ? cS : cM;
+      const x = tr.b.x*sx, y = tr.b.y*sy, w = tr.b.w*sx, h = tr.b.h*sy;
+      vctx.strokeStyle = c; vctx.lineWidth = Math.max(2, view.width/320);
+      vctx.setLineDash(still ? [8,6] : []); vctx.strokeRect(x, y, w, h); vctx.setLineDash([]);
+      const label = "#" + tr.id; const tw = vctx.measureText(label).width + 8, th = Math.max(16, view.width/36);
+      vctx.fillStyle = c; vctx.fillRect(x, Math.max(0, y - th), tw, th);
+      vctx.fillStyle = "#000"; vctx.fillText(label, x + 4, Math.max(th - 4, y - 4));
+      if (tr.trail.length > 1){
+        vctx.beginPath();
+        tr.trail.forEach(([px,py],i) => i ? vctx.lineTo(px*sx,py*sy) : vctx.moveTo(px*sx,py*sy));
+        vctx.strokeStyle = c; vctx.globalAlpha = .7; vctx.stroke(); vctx.globalAlpha = 1;
+      }
+      // знімок нового об'єкта — коли він уже в рамці
+      if (!tr.shot && now - tr.born > 0.25){ tr.shot = true; snapshot(tr.id); }
+    }
+    $("sNow").textContent = tracks.size;
+    $("hud").textContent = clock() + "  ·  " + (motionNow ? "РУХ" : "спокій");
+    if (running) setStatus(motionNow ? "motion" : "live", motionNow ? "рух!" : (stream ? "спостереження" : "аналіз відео"));
+  }
+
+  function clock(){ return new Date().toLocaleTimeString("uk-UA"); }
+
+  function snapshot(id){
+    total++; $("sTotal").textContent = total;
+    const c = document.createElement("canvas"); c.width = 320; c.height = Math.round(320 * view.height / view.width);
+    c.getContext("2d").drawImage(view, 0, 0, c.width, c.height);
+    const li = document.createElement("li");
+    const img = new Image(); img.src = c.toDataURL("image/jpeg", .75); img.alt = "Об'єкт #" + id;
+    const meta = document.createElement("div"); meta.className = "meta";
+    const b = document.createElement("b"); b.textContent = "#" + id;
+    const t = document.createElement("span"); t.textContent = clock();
+    meta.append(b, t); li.append(img, meta);
+    const log = $("log"); log.prepend(li);
+    while (log.children.length > 40) log.lastChild.remove();
+    $("nolog").hidden = true;
+  }
+
+  // --- кнопки
+  $("btnCam").onclick = startCamera;
+  $("btnFlip").onclick = () => { facing = facing === "environment" ? "user" : "environment"; startCamera(); };
+  $("btnReset").onclick = () => { resetBg(); msg("Фон скинуто. Програма запам'ятовує новий."); };
+  $("btnStop").onclick = () => { stopAll(false); msg("Зупинено."); };
+  $("file").onchange = e => { const f = e.target.files[0]; if (f) startFile(f); e.target.value = ""; };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && running && "wakeLock" in navigator)
+      navigator.wakeLock.request("screen").then(l => wakeLock = l).catch(()=>{});
+  });
+})();
+</script>

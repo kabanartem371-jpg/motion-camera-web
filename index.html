@@ -1,3 +1,10 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+</head>
+<body>
 <title>Детектор руху</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,6 +31,8 @@
   --stage:#050708; --stage-fg:#c9d2d8; color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;overflow-x:hidden}
 body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.5}
 .wrap{max-width:880px;margin:0 auto;padding-block:16px 40px;
   padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));
@@ -381,3 +390,6 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   });
 })();
 </script>
+
+</body>
+</html>
